@@ -1,6 +1,7 @@
 use crate::types::{FileInfo, SearchResult};
-use crate::utils::{OutputFormat, print_json, print_toon_files, print_toon_search, print_plain_files, print_plain_search};
+use crate::utils::OutputFormat;
 use anyhow::Result;
+use std::io::{self, Write};
 use std::path::PathBuf;
 use glob_match::glob_match;
 use walkdir::WalkDir;
@@ -18,17 +19,59 @@ fn walk_files_parallel(root: &PathBuf, max_depth: usize) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Flush output for streaming
+fn flush() {
+    let _ = io::stdout().flush();
+}
+
+/// Stream a single file result
+fn stream_file(file: &FileInfo, format: OutputFormat) {
+    match format {
+        OutputFormat::Toon => println!("\t{},{}", file.path, file.size),
+        OutputFormat::Json => {
+            let json = serde_json::to_string(file).unwrap();
+            println!("{}", json);
+        }
+        OutputFormat::Plain => println!("{} {}", file.path, file.size),
+    }
+    flush();
+}
+
+/// Stream a single search result
+fn stream_search(result: &SearchResult, format: OutputFormat) {
+    let content = if result.content.contains(',') || result.content.contains(':') {
+        format!("\"{}\"", result.content)
+    } else {
+        result.content.clone()
+    };
+    match format {
+        OutputFormat::Toon => println!("\t{},{},{}", result.path, result.line, content),
+        OutputFormat::Json => {
+            let json = serde_json::to_string(result).unwrap();
+            println!("{}", json);
+        }
+        OutputFormat::Plain => println!("{}:{}: {}", result.path, result.line, result.content),
+    }
+    flush();
+}
+
 pub fn cmd_find(
     root: &PathBuf,
     pattern: &str,
     limit: usize,
     format: OutputFormat,
+    stream: bool,
 ) -> Result<()> {
-    let files = walk_files_parallel(root, 100); // 100 deep is plenty
-    let mut results = Vec::new();
+    let files = walk_files_parallel(root, 100);
+    let mut count = 0;
 
-    for path in files.into_iter().take(limit * 10) { // Take more than limit since we filter
-        if results.len() >= limit {
+    if stream && format == OutputFormat::Toon {
+        println!("path,size:");
+        flush();
+    }
+
+    for path in files.into_iter() {
+        if count >= limit {
             break;
         }
 
@@ -37,18 +80,29 @@ pub fn cmd_find(
 
         if glob_match(pattern, &path_str) {
             let size = std::fs::metadata(&path).ok().map(|m| m.len()).unwrap_or(0);
-            results.push(FileInfo {
+            let file = FileInfo {
                 path: path_str.to_string(),
                 size,
-            });
+            };
+
+            if stream {
+                stream_file(&file, format);
+            } else if format == OutputFormat::Toon {
+                // Collect for header
+                print!("\t{},{}", file.path, file.size);
+            } else if format == OutputFormat::Json {
+                println!("{}", serde_json::to_string(&file)?);
+            } else {
+                println!("{} {}", file.path, file.size);
+            }
+            count += 1;
         }
     }
 
-    match format {
-        OutputFormat::Toon => print_toon_files(&results),
-        OutputFormat::Json => print_json(&results)?,
-        OutputFormat::Plain => print_plain_files(&results),
+    if format == OutputFormat::Toon && !stream {
+        println!();
     }
+
     Ok(())
 }
 
@@ -58,16 +112,22 @@ pub fn cmd_search(
     ext_filter: Option<&str>,
     limit: usize,
     format: OutputFormat,
+    stream: bool,
 ) -> Result<()> {
     let exts: Vec<String> = ext_filter
         .map(|e| e.split(',').map(|s| s.trim().to_string()).collect())
         .unwrap_or_default();
 
     let files = walk_files_parallel(root, 100);
-    let mut results = Vec::new();
+    let mut count = 0;
 
-    for path in files.into_iter().take(limit * 100) { // Take more since we filter
-        if results.len() >= limit {
+    if stream && format == OutputFormat::Toon {
+        println!("path,line,content:");
+        flush();
+    }
+
+    for path in files.into_iter() {
+        if count >= limit {
             break;
         }
 
@@ -87,25 +147,37 @@ pub fn cmd_search(
         if let Ok(content) = std::fs::read_to_string(&path) {
             let relative = path.strip_prefix(root)?;
             for (line_num, line) in content.lines().enumerate() {
+                if count >= limit {
+                    break;
+                }
                 if line.contains(query) {
-                    results.push(SearchResult {
+                    let result = SearchResult {
                         path: relative.to_string_lossy().to_string(),
                         line: line_num + 1,
                         content: line.trim().to_string(),
-                    });
-                    if results.len() >= limit {
-                        break;
+                    };
+
+                    if stream {
+                        stream_search(&result, format);
+                    } else if format == OutputFormat::Toon {
+                        print!("\t{},{},", result.path, result.line);
+                        if result.content.contains(',') || result.content.contains(':') {
+                            print!("\"{}\"", result.content);
+                        } else {
+                            print!("{}", result.content);
+                        }
+                        println!();
+                    } else if format == OutputFormat::Json {
+                        println!("{}", serde_json::to_string(&result)?);
+                    } else {
+                        println!("{}:{}: {}", result.path, result.line, result.content);
                     }
+                    count += 1;
                 }
             }
         }
     }
 
-    match format {
-        OutputFormat::Toon => print_toon_search(&results),
-        OutputFormat::Json => print_json(&results)?,
-        OutputFormat::Plain => print_plain_search(&results),
-    }
     Ok(())
 }
 
@@ -113,24 +185,103 @@ pub fn cmd_list(
     root: &PathBuf,
     limit: usize,
     format: OutputFormat,
+    stream: bool,
 ) -> Result<()> {
     let files = walk_files_parallel(root, 100);
-    let mut results = Vec::new();
+    let mut count = 0;
 
-    for path in files.into_iter().take(limit) {
+    if stream && format == OutputFormat::Toon {
+        println!("path,size:");
+        flush();
+    }
+
+    for path in files.into_iter() {
+        if count >= limit {
+            break;
+        }
+
         let relative = path.strip_prefix(root)?;
         let size = std::fs::metadata(&path).ok().map(|m| m.len()).unwrap_or(0);
-
-        results.push(FileInfo {
+        let file = FileInfo {
             path: relative.to_string_lossy().to_string(),
             size,
-        });
+        };
+
+        if stream {
+            stream_file(&file, format);
+        } else if format == OutputFormat::Toon {
+            print!("\t{},{}", file.path, file.size);
+            println!();
+        } else if format == OutputFormat::Json {
+            println!("{}", serde_json::to_string(&file)?);
+        } else {
+            println!("{} {}", file.path, file.size);
+        }
+        count += 1;
     }
 
-    match format {
-        OutputFormat::Toon => print_toon_files(&results),
-        OutputFormat::Json => print_json(&results)?,
-        OutputFormat::Plain => print_plain_files(&results),
+    Ok(())
+}
+
+/// Estimate: Show file count and total size for a directory
+pub fn cmd_estimate(root: &PathBuf, sample_limit: usize) -> Result<()> {
+    // Use sequential walk for consistent sampling (parallel gives random order)
+    let files: Vec<PathBuf> = WalkDir::new(root)
+        .max_depth(100)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    // Sample-based estimation for speed
+    let sample_size = std::cmp::min(files.len(), sample_limit);
+    let mut total_size: u64 = 0;
+    let mut ext_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+    for path in files.iter().take(sample_size) {
+        if let Ok(meta) = std::fs::metadata(path) {
+            total_size += meta.len();
+        }
+
+        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            *ext_counts.entry(ext.to_string()).or_insert(0) += 1;
+        }
     }
+
+    // Extrapolate
+    let total_files = files.len();
+    let estimated_total_size = if sample_size > 0 {
+        (total_size as f64 / sample_size as f64) * total_files as f64
+    } else {
+        0.0
+    };
+
+    // Format size nicely
+    fn format_size(bytes: f64) -> String {
+        if bytes >= 1_000_000_000.0 {
+            format!("{:.2} GB", bytes / 1_000_000_000.0)
+        } else if bytes >= 1_000_000.0 {
+            format!("{:.2} MB", bytes / 1_000_000.0)
+        } else if bytes >= 1_000.0 {
+            format!("{:.2} KB", bytes / 1_000.0)
+        } else {
+            format!("{} B", bytes as u64)
+        }
+    }
+
+    println!("file_count: {}", total_files);
+    println!("sampled: {}", sample_size);
+    println!("total_size: {} (estimated)", format_size(estimated_total_size));
+    println!("sample_size: {} (actual)", format_size(total_size as f64));
+
+    // Top 5 extensions
+    let mut ext_vec: Vec<_> = ext_counts.iter().collect();
+    ext_vec.sort_by(|a, b| b.1.cmp(a.1));
+    println!("top_extensions:");
+    for (ext, count) in ext_vec.iter().take(5) {
+        println!("  {}: {}", ext, count);
+    }
+
     Ok(())
 }

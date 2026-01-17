@@ -6,7 +6,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-use commands::{cmd_find, cmd_list, cmd_search};
+use commands::{cmd_find, cmd_list, cmd_search, cmd_estimate};
 use utils::OutputFormat;
 
 #[derive(Parser)]
@@ -21,6 +21,9 @@ struct Cli {
 
     #[arg(short = 'F', long, global = true, default_value = "toon")]
     format: String,
+
+    #[arg(long, global = true)]
+    stream: bool,
 }
 
 #[derive(Subcommand)]
@@ -41,6 +44,10 @@ enum Commands {
         #[arg(short, long, default_value = "100")]
         limit: usize,
     },
+    Estimate {
+        #[arg(short, long, default_value = "1000")]
+        limit: usize,
+    },
 }
 
 fn main() -> Result<()> {
@@ -55,13 +62,16 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Find { pattern, limit } => {
-            cmd_find(&root, &pattern, limit, format)?;
+            cmd_find(&root, &pattern, limit, format, cli.stream)?;
         }
         Commands::Search { query, ext, limit } => {
-            cmd_search(&root, &query, ext.as_deref(), limit, format)?;
+            cmd_search(&root, &query, ext.as_deref(), limit, format, cli.stream)?;
         }
         Commands::List { limit } => {
-            cmd_list(&root, limit, format)?;
+            cmd_list(&root, limit, format, cli.stream)?;
+        }
+        Commands::Estimate { limit } => {
+            cmd_estimate(&root, limit)?;
         }
     }
 
