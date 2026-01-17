@@ -17,9 +17,3 @@ impl OutputFormat {
         }
     }
 }
-
-/// Generic JSON printer for any serializable type
-pub fn print_json<T: Serialize>(data: &T) -> anyhow::Result<()> {
-    println!("{}", serde_json::to_string(data)?);
-    Ok(())
-}
