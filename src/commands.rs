@@ -6,18 +6,7 @@ use glob_match::glob_match;
 use walkdir::WalkDir;
 use rayon::prelude::*;
 
-/// Simple parallel file walk - shows EVERYTHING
-fn walk_files(root: &PathBuf, max_depth: usize) -> Vec<PathBuf> {
-    WalkDir::new(root)
-        .max_depth(max_depth)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.path().to_path_buf())
-        .collect()
-}
-
-/// Parallel walk for large directories
+/// Parallel walk for large directories - shows EVERYTHING
 fn walk_files_parallel(root: &PathBuf, max_depth: usize) -> Vec<PathBuf> {
     WalkDir::new(root)
         .max_depth(max_depth)
