@@ -1,41 +1,53 @@
-use crate::filter::should_exclude;
 use crate::types::{FileInfo, SearchResult};
 use crate::utils::{OutputFormat, print_json, print_toon_files, print_toon_search, print_plain_files, print_plain_search};
 use anyhow::Result;
 use std::path::PathBuf;
 use glob_match::glob_match;
+use walkdir::WalkDir;
+use rayon::prelude::*;
+
+/// Simple parallel file walk - shows EVERYTHING
+fn walk_files(root: &PathBuf, max_depth: usize) -> Vec<PathBuf> {
+    WalkDir::new(root)
+        .max_depth(max_depth)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.path().to_path_buf())
+        .collect()
+}
+
+/// Parallel walk for large directories
+fn walk_files_parallel(root: &PathBuf, max_depth: usize) -> Vec<PathBuf> {
+    WalkDir::new(root)
+        .max_depth(max_depth)
+        .into_iter()
+        .par_bridge()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.path().to_path_buf())
+        .collect()
+}
 
 pub fn cmd_find(
     root: &PathBuf,
     pattern: &str,
     limit: usize,
-    use_gitignore: bool,
-    show_hidden: bool,
-    excludes: &[String],
     format: OutputFormat,
 ) -> Result<()> {
-    let mut builder = ignore::WalkBuilder::new(root);
-    builder.git_ignore(use_gitignore).hidden(!show_hidden).threads(num_cpus::get());
-
+    let files = walk_files_parallel(root, 100); // 100 deep is plenty
     let mut results = Vec::new();
 
-    for entry in builder.build() {
+    for path in files.into_iter().take(limit * 10) { // Take more than limit since we filter
         if results.len() >= limit {
             break;
-        }
-
-        let entry = entry?;
-        let path = entry.path();
-
-        if path.is_dir() || should_exclude(path, excludes) {
-            continue;
         }
 
         let relative = path.strip_prefix(root)?;
         let path_str = relative.to_string_lossy();
 
         if glob_match(pattern, &path_str) {
-            let size = std::fs::metadata(path).ok().map(|m| m.len()).unwrap_or(0);
+            let size = std::fs::metadata(&path).ok().map(|m| m.len()).unwrap_or(0);
             results.push(FileInfo {
                 path: path_str.to_string(),
                 size,
@@ -56,30 +68,18 @@ pub fn cmd_search(
     query: &str,
     ext_filter: Option<&str>,
     limit: usize,
-    use_gitignore: bool,
-    show_hidden: bool,
-    excludes: &[String],
     format: OutputFormat,
 ) -> Result<()> {
     let exts: Vec<String> = ext_filter
         .map(|e| e.split(',').map(|s| s.trim().to_string()).collect())
         .unwrap_or_default();
 
-    let mut builder = ignore::WalkBuilder::new(root);
-    builder.git_ignore(use_gitignore).hidden(!show_hidden).threads(num_cpus::get());
-
+    let files = walk_files_parallel(root, 100);
     let mut results = Vec::new();
 
-    for entry in builder.build() {
+    for path in files.into_iter().take(limit * 100) { // Take more since we filter
         if results.len() >= limit {
             break;
-        }
-
-        let entry = entry?;
-        let path = entry.path();
-
-        if path.is_dir() || should_exclude(path, excludes) {
-            continue;
         }
 
         // Extension filter
@@ -95,7 +95,7 @@ pub fn cmd_search(
         }
 
         // Search content
-        if let Ok(content) = std::fs::read_to_string(path) {
+        if let Ok(content) = std::fs::read_to_string(&path) {
             let relative = path.strip_prefix(root)?;
             for (line_num, line) in content.lines().enumerate() {
                 if line.contains(query) {
@@ -122,31 +122,15 @@ pub fn cmd_search(
 
 pub fn cmd_list(
     root: &PathBuf,
-    use_gitignore: bool,
-    show_hidden: bool,
-    excludes: &[String],
     limit: usize,
     format: OutputFormat,
 ) -> Result<()> {
-    let mut builder = ignore::WalkBuilder::new(root);
-    builder.git_ignore(use_gitignore).hidden(!show_hidden).threads(num_cpus::get());
-
+    let files = walk_files_parallel(root, 100);
     let mut results = Vec::new();
 
-    for entry in builder.build() {
-        if results.len() >= limit {
-            break;
-        }
-
-        let entry = entry?;
-        let path = entry.path();
-
-        if path.is_dir() || should_exclude(path, excludes) {
-            continue;
-        }
-
+    for path in files.into_iter().take(limit) {
         let relative = path.strip_prefix(root)?;
-        let size = std::fs::metadata(path).ok().map(|m| m.len()).unwrap_or(0);
+        let size = std::fs::metadata(&path).ok().map(|m| m.len()).unwrap_or(0);
 
         results.push(FileInfo {
             path: relative.to_string_lossy().to_string(),
