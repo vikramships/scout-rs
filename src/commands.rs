@@ -1,8 +1,9 @@
 use crate::filter::should_exclude;
 use crate::types::{FileInfo, SearchResult};
-use crate::utils::{glob_to_regex, print_json};
+use crate::utils::print_json;
 use anyhow::Result;
 use std::path::PathBuf;
+use glob_match::glob_match;
 
 pub fn cmd_find(
     root: &PathBuf,
@@ -12,11 +13,10 @@ pub fn cmd_find(
     show_hidden: bool,
     excludes: &[String],
 ) -> Result<()> {
-    let mut results = Vec::new();
-    let regex_pattern = glob_to_regex(pattern);
-
     let mut builder = ignore::WalkBuilder::new(root);
-    builder.git_ignore(use_gitignore).hidden(!show_hidden);
+    builder.git_ignore(use_gitignore).hidden(!show_hidden).threads(num_cpus::get());
+
+    let mut results = Vec::new();
 
     for entry in builder.build() {
         if results.len() >= limit {
@@ -33,8 +33,8 @@ pub fn cmd_find(
         let relative = path.strip_prefix(root)?;
         let path_str = relative.to_string_lossy();
 
-        if regex_pattern.is_match(&path_str) {
-            let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        if glob_match(pattern, &path_str) {
+            let size = std::fs::metadata(path).ok().map(|m| m.len()).unwrap_or(0);
             results.push(FileInfo {
                 path: path_str.to_string(),
                 size,
@@ -54,13 +54,14 @@ pub fn cmd_search(
     show_hidden: bool,
     excludes: &[String],
 ) -> Result<()> {
-    let mut results = Vec::new();
-    let exts: Vec<&str> = ext_filter
-        .map(|e| e.split(',').map(|s| s.trim()).collect())
+    let exts: Vec<String> = ext_filter
+        .map(|e| e.split(',').map(|s| s.trim().to_string()).collect())
         .unwrap_or_default();
 
     let mut builder = ignore::WalkBuilder::new(root);
-    builder.git_ignore(use_gitignore).hidden(!show_hidden);
+    builder.git_ignore(use_gitignore).hidden(!show_hidden).threads(num_cpus::get());
+
+    let mut results = Vec::new();
 
     for entry in builder.build() {
         if results.len() >= limit {
@@ -79,7 +80,7 @@ pub fn cmd_search(
             let has_ext = path
                 .extension()
                 .and_then(|e| e.to_str())
-                .map(|e| exts.contains(&e))
+                .map(|e| exts.iter().any(|ext| ext == e))
                 .unwrap_or(false);
             if !has_ext {
                 continue;
@@ -114,10 +115,10 @@ pub fn cmd_list(
     excludes: &[String],
     limit: usize,
 ) -> Result<()> {
-    let mut results = Vec::new();
-
     let mut builder = ignore::WalkBuilder::new(root);
-    builder.git_ignore(use_gitignore).hidden(!show_hidden);
+    builder.git_ignore(use_gitignore).hidden(!show_hidden).threads(num_cpus::get());
+
+    let mut results = Vec::new();
 
     for entry in builder.build() {
         if results.len() >= limit {
@@ -132,7 +133,7 @@ pub fn cmd_list(
         }
 
         let relative = path.strip_prefix(root)?;
-        let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        let size = std::fs::metadata(path).ok().map(|m| m.len()).unwrap_or(0);
 
         results.push(FileInfo {
             path: relative.to_string_lossy().to_string(),
