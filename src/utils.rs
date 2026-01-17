@@ -1,5 +1,3 @@
-use serde::Serialize;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputFormat {
     Toon,  // Compact TOON-like format (default for AI)
