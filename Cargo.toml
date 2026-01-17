@@ -1,0 +1,35 @@
+[package]
+name = "scout"
+version = "0.1.0"
+edition = "2021"
+description = "Blazing fast file finder and searcher for AI agents"
+license = "MIT"
+repository = "https://github.com/vikramships/scout"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# JSON output
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Fast file walking
+ignore = "0.4"
+walkdir = "2"
+
+# Regex for content search
+regex = "1"
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# Error handling
+anyhow = "1"
+
+# File hashing for caching
+blake3 = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
