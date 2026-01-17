@@ -36,8 +36,8 @@ $ scout find "src/**/*.rs"
 ## Install
 
 ```bash
-git clone https://github.com/vikramships/scout.git
-cd scout
+git clone https://github.com/vikramships/scout-rs.git
+cd scout-rs
 cargo build --release
 cp target/release/scout ~/.local/bin/
 ```
@@ -120,6 +120,6 @@ MIT
 
 <div align="center">
 
-https://github.com/vikramships/scout
+https://github.com/vikramships/scout-rs
 
 </div>
