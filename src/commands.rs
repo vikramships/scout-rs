@@ -1,6 +1,6 @@
 use crate::filter::should_exclude;
 use crate::types::{FileInfo, SearchResult};
-use crate::utils::print_json;
+use crate::utils::{OutputFormat, print_json, print_toon_files, print_toon_search, print_plain_files, print_plain_search};
 use anyhow::Result;
 use std::path::PathBuf;
 use glob_match::glob_match;
@@ -12,6 +12,7 @@ pub fn cmd_find(
     use_gitignore: bool,
     show_hidden: bool,
     excludes: &[String],
+    format: OutputFormat,
 ) -> Result<()> {
     let mut builder = ignore::WalkBuilder::new(root);
     builder.git_ignore(use_gitignore).hidden(!show_hidden).threads(num_cpus::get());
@@ -42,7 +43,12 @@ pub fn cmd_find(
         }
     }
 
-    print_json(&results)
+    match format {
+        OutputFormat::Toon => print_toon_files(&results),
+        OutputFormat::Json => print_json(&results)?,
+        OutputFormat::Plain => print_plain_files(&results),
+    }
+    Ok(())
 }
 
 pub fn cmd_search(
@@ -53,6 +59,7 @@ pub fn cmd_search(
     use_gitignore: bool,
     show_hidden: bool,
     excludes: &[String],
+    format: OutputFormat,
 ) -> Result<()> {
     let exts: Vec<String> = ext_filter
         .map(|e| e.split(',').map(|s| s.trim().to_string()).collect())
@@ -105,7 +112,12 @@ pub fn cmd_search(
         }
     }
 
-    print_json(&results)
+    match format {
+        OutputFormat::Toon => print_toon_search(&results),
+        OutputFormat::Json => print_json(&results)?,
+        OutputFormat::Plain => print_plain_search(&results),
+    }
+    Ok(())
 }
 
 pub fn cmd_list(
@@ -114,6 +126,7 @@ pub fn cmd_list(
     show_hidden: bool,
     excludes: &[String],
     limit: usize,
+    format: OutputFormat,
 ) -> Result<()> {
     let mut builder = ignore::WalkBuilder::new(root);
     builder.git_ignore(use_gitignore).hidden(!show_hidden).threads(num_cpus::get());
@@ -141,5 +154,10 @@ pub fn cmd_list(
         });
     }
 
-    print_json(&results)
+    match format {
+        OutputFormat::Toon => print_toon_files(&results),
+        OutputFormat::Json => print_json(&results)?,
+        OutputFormat::Plain => print_plain_files(&results),
+    }
+    Ok(())
 }

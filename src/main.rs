@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use commands::{cmd_find, cmd_list, cmd_search};
 use filter::build_exclude_patterns;
+use utils::OutputFormat;
 
 #[derive(Parser)]
 #[command(name = "scout")]
@@ -30,6 +31,9 @@ struct Cli {
 
     #[arg(long, global = true)]
     exclude: Option<String>,
+
+    #[arg(short = 'F', long, global = true, default_value = "toon")]
+    format: String,
 }
 
 #[derive(Subcommand)]
@@ -57,15 +61,21 @@ fn main() -> Result<()> {
     let root = cli.root.clone().unwrap_or(std::env::current_dir()?);
     let excludes = build_exclude_patterns(&cli.exclude);
 
+    let format = OutputFormat::from_str(&cli.format)
+        .unwrap_or_else(|| {
+            eprintln!("Invalid format '{}'. Valid options: toon, json, plain", cli.format);
+            std::process::exit(1);
+        });
+
     match cli.command {
         Commands::Find { pattern, limit } => {
-            cmd_find(&root, &pattern, limit, cli.gitignore, cli.hidden, &excludes)?;
+            cmd_find(&root, &pattern, limit, cli.gitignore, cli.hidden, &excludes, format)?;
         }
         Commands::Search { query, ext, limit } => {
-            cmd_search(&root, &query, ext.as_deref(), limit, cli.gitignore, cli.hidden, &excludes)?;
+            cmd_search(&root, &query, ext.as_deref(), limit, cli.gitignore, cli.hidden, &excludes, format)?;
         }
         Commands::List { limit } => {
-            cmd_list(&root, cli.gitignore, cli.hidden, &excludes, limit)?;
+            cmd_list(&root, cli.gitignore, cli.hidden, &excludes, limit, format)?;
         }
     }
 
